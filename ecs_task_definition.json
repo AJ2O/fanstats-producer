@@ -1,0 +1,33 @@
+{
+    "executionRoleArn": "arn:aws:iam::<account-id>:role/<role>",
+    "containerDefinitions": [
+        {
+            "image": "<docker-image>",
+            "name": "fanstats-producer",
+            "environment": [
+                {
+                    "name": "DATA_FILE",
+                    "value": "nba.yaml"
+                },
+                {
+                    "name": "STORAGE_BUCKET",
+                    "value": "<storage-bucket>"
+                }
+            ],
+            "secrets": [
+                {
+                    "valueFrom": "<ssm parameter store OR secrets manager>",
+                    "name": "TWITTER_BEARER_TOKEN"
+                }
+            ]
+        }
+    ],
+    "memory": "512",
+    "taskRoleArn": "arn:aws:iam::<account-id>:role/<role>",
+    "family": "fanstats-producer",
+    "requiresCompatibilities": [
+        "FARGATE"
+    ],
+    "networkMode": "awsvpc",
+    "cpu": "256"
+}
