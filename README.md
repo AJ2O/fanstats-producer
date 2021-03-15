@@ -5,3 +5,8 @@ It runs as a Docker container on the [Amazon ECS](https://aws.amazon.com/ecs/) p
 
 ## Architecture Diagram
 ![Architecure](Architecture.png)
+
+## Notes
+- The producer code is in [`src/main.py`](src/main.py).
+- Only Twitter is supported currently.
+- The CloudFormation (or Terraform) template to set up the rest of the AWS resources is coming soon.
