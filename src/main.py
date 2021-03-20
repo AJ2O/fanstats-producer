@@ -60,6 +60,26 @@ def load_platforms(platforms_file):
         data = documents[1]
         return version, data
 
+# S3 helpers 
+def upload_results(
+    date,
+    s3_path='SocialMedia/League',
+    results_file='tmp.json'):
+
+    # partition based on start date
+    s3_key = s3_path \
+        + "/" \
+        + date.strftime("%Y/%m/%d/") \
+        + results_file
+
+    # upload to S3
+    s3_client.upload_file(
+        Filename=results_file,
+        Bucket=STORAGE_BUCKET,
+        Key=s3_key
+    )
+    print("Uploaded results to s3://" + s3_key)
+
 # Twitter helpers
 def create_twitter_url(
     entity,
@@ -69,7 +89,8 @@ def create_twitter_url(
     query_args="-is:retweet lang:en -%23nbatopshot",
     tweet_fields="created_at,context_annotations,entities,public_metrics"):
     '''
-    Constructs the Twitter URL to query against a given Twitter entity.
+    Constructs the Twitter API call to collect information about the given 
+    entity, dating back to the oldest specified time.
     '''
     if max_results > RESULTS_PER_PAGE:
         max_results = RESULTS_PER_PAGE
@@ -98,12 +119,15 @@ def twitter_auth_and_connect(bearer_token, url):
     response = requests.request("GET", url, headers=headers)
     return response.json()
 
-# Twitter, data = v1.0
 def write_tweets(
     start_date,
     topic_data,
     output_file='tmp.json'
     ):
+    '''
+    Collects tweets about the given topic and writes them to the specified 
+    output file.
+    '''
     # collect tweets
     topic = topic_data['topic']
     results_counted = 0
@@ -135,11 +159,14 @@ def write_tweets(
         else:
             break
 
-def write_twitter_data(
+def collect_and_write_twitter_data(
     data,
     start_date,
     datafile_version=1.0
     ):
+    '''
+    Aggregates and uploads Twitter data based on the given data template.
+    '''
     if datafile_version == 1.0:
         topic = data['topic']
         topic_type = data['type']
@@ -152,26 +179,17 @@ def write_twitter_data(
         # write tweets into JSON file
         write_tweets(start_date, topic_data=data, output_file=output_file)
 
-        # upload file to S3 (if it exists)
+        # upload file to S3 (if there was any info)
         if (os.path.exists(output_file)):
             s3_key_partition = topic
             if topic_type == 'Team':
                 s3_key_partition = data['League']
-
-            # partition based on league and start date
-            s3_key = "Twitter/" \
-                + s3_key_partition \
-                + "/" \
-                + start_date.strftime("%Y/%m/%d/") \
-                + output_file
-
-            # upload to S3
-            s3_client.upload_file(
-                Filename=output_file,
-                Bucket=STORAGE_BUCKET,
-                Key=s3_key
+            
+            upload_results(
+                date=start_date,
+                s3_path='Twitter/' + s3_key_partition,
+                results_file=output_file
             )
-            print("Uploaded Twitter data to s3://" + s3_key)
         else:
             print("No Twitter data found")
     else:
@@ -181,22 +199,26 @@ def write_twitter_data(
             + " is unsupported for Twitter"
         )
 
-# platform = v1.0
+# platform helpers
 def collect_and_write_all_platform_data_v1_0(
     data,
     platforms_data,
     start_date,
     datafile_version=1.0
     ):
+    '''
+    Handles the aggregation of data based on version 1.0 platformfiles.
+    '''
     platforms = platforms_data['platforms']
     print(str(len(platforms)) + " social media platforms: " + str(platforms))
     for p in platforms:
         print("Collecting " + p + " data...")
         if p == 'Twitter':
-            write_twitter_data(data, start_date, datafile_version)
+            collect_and_write_twitter_data(data, start_date, datafile_version)
         else:
             raise("Social media platform " + p + " is unsupported")
 
+# main
 def collect_and_write_data(
     data,
     platforms_data,
@@ -204,6 +226,10 @@ def collect_and_write_data(
     datafile_version=1.0,
     platformfile_version=1.0,
     ):
+    '''
+    Aggregates social media posts based on a data template, and social media 
+    template, then uploads them to AWS.
+    '''
     if platformfile_version == 1.0:
         collect_and_write_all_platform_data_v1_0(
             data=data,
@@ -214,7 +240,6 @@ def collect_and_write_data(
     else:
         raise("Platformfile version " + platformfile_version + " is unsupported")
 
-# main
 def main():
     global STORAGE_BUCKET
     global TWITTER_BEARER_TOKEN
