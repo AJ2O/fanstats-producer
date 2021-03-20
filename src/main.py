@@ -98,75 +98,14 @@ def twitter_auth_and_connect(bearer_token, url):
     response = requests.request("GET", url, headers=headers)
     return response.json()
 
-# social media platform data collection
-def get_team_data_from_twitter(team):
-    data = []
-    results_counted = 0
-    next_token = None
-
-    while results_counted < MAX_RESULTS:
-        # load tweets
-        url = create_twitter_url(
-            entity=team, 
-            max_results=RESULTS_PER_PAGE, 
-            next_token=next_token
-        )
-        res_twitter = twitter_auth_and_connect(TWITTER_BEARER_TOKEN, url)
-
-        # add data
-        if 'data' in res_twitter:
-            data.extend(res_twitter['data'])
-
-        # end loop early if there is no next_token
-        results_counted += res_twitter['meta']['result_count']
-        if 'next_token' in res_twitter['meta']:
-            next_token = res_twitter['meta']['next_token']
-        else:
-            break
-
-    return data
-
-
-# team data collection
-def write_team_data(league, team, platform='Twitter', output_file='tmp.json'):
-    print("Processing " + team + " data from " + platform + "...")
-    data = []
-    # Twitter
-    if platform == 'Twitter':
-        data = get_team_data_from_twitter(team)
-
-    # write json output
-    with open(output_file, 'a') as outfile:
-        for data_point in data: 
-            # add columns for league and team name
-            data_point['league'] = league
-            data_point['team'] = team
-            outfile.write(json.dumps(data_point) + '\n')
-   
-def write_all_team_data(
-    league, 
-    teams, 
-    platform='Twitter', 
-    output_file='tmp.json'):
-    data = []
-    for i in range(len(teams)):
-        team = teams[i]
-        write_team_data(
-            league, 
-            team, 
-            platform=platform, 
-            output_file=output_file)
-
-    return data
-
-
 # Twitter, data = v1.0
-def get_tweets(
+def write_tweets(
     start_date,
-    topic='NBA'
+    topic_data,
+    output_file='tmp.json'
     ):
     # collect tweets
-    tweets = []
+    topic = topic_data['topic']
     results_counted = 0
     next_token = None
 
@@ -183,7 +122,11 @@ def get_tweets(
 
         # add data
         if 'data' in res_twitter:
-            tweets.extend(res_twitter['data'])
+            tweets = res_twitter['data']
+            # write output
+            with open(output_file, 'a') as outfile:
+                for tweet in tweets:
+                    outfile.write(json.dumps(tweet) + '\n')
 
         # end loop early if there is no next_token
         results_counted += res_twitter['meta']['result_count']
@@ -191,7 +134,6 @@ def get_tweets(
             next_token = res_twitter['meta']['next_token']
         else:
             break
-    return tweets
 
 def write_twitter_data(
     data,
@@ -204,28 +146,34 @@ def write_twitter_data(
         aliases = data['aliases']
 
         # Twitter API v2 is in JSON format
-        output_time = datetime.datetime.utcnow()
-        output_time.microsecond = 0
-        output_file = str(output_time) + ".json"
+        #output_time = datetime.datetime.utcnow()
+        output_file = strftime("%H-%M-%S", gmtime()) + ".json"
 
-        tweets = get_tweets(start_date, topic=topic)
-        # write json output
-        with open(output_file, 'a') as outfile:
-            for tweet in tweets:
-                outfile.write(json.dumps(tweet) + '\n')
+        # write tweets into JSON file
+        write_tweets(start_date, topic_data=data, output_file=output_file)
 
-        # upload file to S3
-        s3_key_partition = topic
-        if topic_type == 'Team':
-            s3_key_partition = data['League']
+        # upload file to S3 (if it exists)
+        if (os.path.exists(output_file)):
+            s3_key_partition = topic
+            if topic_type == 'Team':
+                s3_key_partition = data['League']
 
-        s3_key = "Twitter/" + s3_key_partition + "/" + output_file
-        s3_client.upload_file(
-            Filename=output_file,
-            Bucket=STORAGE_BUCKET,
-            Key=s3_key
-        )
-        print("Uploaded data to s3://" + s3_key)
+            # partition based on league and start date
+            s3_key = "Twitter/" \
+                + s3_key_partition \
+                + "/" \
+                + start_date.strftime("%Y/%m/%d/") \
+                + output_file
+
+            # upload to S3
+            s3_client.upload_file(
+                Filename=output_file,
+                Bucket=STORAGE_BUCKET,
+                Key=s3_key
+            )
+            print("Uploaded Twitter data to s3://" + s3_key)
+        else:
+            print("No Twitter data found")
     else:
         raise(
             "Datafile version " 
