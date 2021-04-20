@@ -9,14 +9,14 @@ parser.add_argument(
     metavar='N', 
     type=int, 
     default=100,
-    help='The number of Twitter results to retrieve per page request')
+    help='The number of Twitter results to retrieve per page request.')
 parser.add_argument(
     '-m',
     '--twitter_max_results', 
     metavar='N',
     type=int, 
     default=3000,
-    help='The maximum number of Twitter results to retrieve')
+    help='The maximum number of Twitter results to retrieve.')
 args = parser.parse_args()
 
 # constants / environment variables
@@ -272,43 +272,6 @@ def main():
         platformfile_version=platformfile_version['version']
     )
     print("Finished collecting all data!")
-
-    ''' load data for each given social media platform
-    for platform in social_media_platforms:
-        print("Started collecting " + platform + " data...")
-
-        ### Team Data Start
-        print("Collecting " + platform + " team data...")
-        start_time = strftime("%Y-%m-%d-%H-%M-%S", gmtime())
-        output_file = start_time + ".json"
-
-        write_all_team_data(
-            league, 
-            teams, 
-            platform=platform, 
-            output_file=output_file)
-        print("Finished collecting " + platform + " team data!")
-
-        # upload file to S3
-        s3_key = platform \
-            + "/" \
-            + league \
-            + "/" \
-            + strftime("%Y/%m/%d/%H-%M-%S", gmtime()) + ".json"
-        s3_client.upload_file(
-            Filename=output_file,
-            Bucket=STORAGE_BUCKET,
-            Key=s3_key
-        )
-        print("Uploaded " 
-            + platform 
-            + " team data results to s3://" + STORAGE_BUCKET + "/" + s3_key)
-        ### Team Data End
-
-        print("Finished collecting " + platform + " data!")
-    
-    print("Finished " + league + " data collection!")
-    '''
 
 if __name__ == "__main__":
     main()
