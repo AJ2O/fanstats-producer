@@ -50,8 +50,21 @@ module "vpc" {
 
   enable_nat_gateway = false
 }
+resource "aws_security_group" "app-layer" {
+  name        = "App Layer"
+  description = "Applies to application backend-layer instances."
+  vpc_id      = module.vpc.vpc_id
 
-#--- ECS
+  egress {
+    from_port        = 0
+    to_port          = 0
+    protocol         = "-1"
+    cidr_blocks      = ["0.0.0.0/0"]
+    ipv6_cidr_blocks = ["::/0"]
+  }
+}
+
+#--- Elastic Container Service
 resource "aws_ecr_repository" "ecr_repo" {
   name = "fanstats-producer"
 }
@@ -117,3 +130,117 @@ resource "aws_iam_role_policy_attachment" "producer_role_ecs_attach" {
   role       = aws_iam_role.producer_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
+
+# ECS
+resource "aws_ecs_task_definition" "producer" {
+  family = "fs-producer"
+  cpu    = 256
+  memory = 512
+  container_definitions = jsonencode([
+    {
+      name  = "fanstats-producer"
+      image = "${aws_ecr_repository.ecr_repo.repository_url}:${var.image_tag}"
+      environment = [
+        {
+          name  = "DATA_FILE"
+          value = var.ecs_env_DATA_FILE
+        },
+        {
+          name  = "STORAGE_BUCKET"
+          value = aws_s3_bucket.posts_storage.id
+        }
+      ]
+      secrets = [
+        {
+          name      = "TWITTER_BEARER_TOKEN",
+          valueFrom = aws_ssm_parameter.twitter_api_key.arn
+        }
+      ]
+    }
+  ])
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+
+  execution_role_arn = aws_iam_role.producer_role.arn
+  task_role_arn      = aws_iam_role.producer_role.arn
+}
+resource "aws_ecs_cluster" "cluster" {
+  name = "FanStats-Producer-Cluster"
+}
+
+# EventBridge
+resource "aws_iam_role" "ecs_events" {
+  name = "ecs_events"
+
+  assume_role_policy = <<DOC
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "events.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+DOC
+}
+resource "aws_iam_role_policy" "ecs_events_run_task_with_any_role" {
+  name = "ecs_events_run_task_with_any_role"
+  role = aws_iam_role.ecs_events.id
+
+  policy = <<DOC
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": "iam:PassRole",
+            "Resource": "*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": "ecs:RunTask",
+            "Resource": "${replace(aws_ecs_task_definition.producer.arn, "/:\\d+$/", ":*")}"
+        }
+    ]
+}
+DOC
+}
+
+resource "aws_cloudwatch_event_rule" "at_midnight" {
+  name                = "FSAI-TriggerProducers"
+  description         = "Triggers FanStats Team Producer tasks."
+  schedule_expression = "cron(0 5 ? * * *)"
+}
+resource "aws_cloudwatch_event_target" "ecs_run_task" {
+  target_id = "run-task-every-midnight"
+  arn       = aws_ecs_cluster.cluster.arn
+  rule      = aws_cloudwatch_event_rule.at_midnight.name
+  role_arn  = aws_iam_role.ecs_events.arn
+
+  ecs_target {
+    task_count          = 1
+    task_definition_arn = aws_ecs_task_definition.producer.arn
+
+    launch_type      = "FARGATE"
+    platform_version = "LATEST"
+
+    network_configuration {
+      assign_public_ip = true
+      security_groups = [
+        aws_security_group.app-layer.id
+      ]
+      subnets = [
+        module.vpc.public_subnets[0],
+        module.vpc.public_subnets[1],
+        module.vpc.public_subnets[2],
+      ]
+    }
+  }
+}
+
+#--- Analytics
