@@ -71,7 +71,7 @@ resource "aws_ecr_repository" "ecr_repo" {
 
 # IAM
 resource "aws_iam_role" "producer_role" {
-  name_prefix = "fs-producer-role"
+  name_prefix = "fs-producer-ecs-role"
   description = "Allows the FS Producer Tasks to call AWS services on your behalf."
 
   assume_role_policy = jsonencode({
@@ -172,7 +172,7 @@ resource "aws_ecs_cluster" "cluster" {
 resource "aws_iam_role" "ecs_events" {
   name = "ecs_events"
 
-  assume_role_policy = <<DOC
+  assume_role_policy = <<EOF
 {
   "Version": "2012-10-17",
   "Statement": [
@@ -186,13 +186,13 @@ resource "aws_iam_role" "ecs_events" {
     }
   ]
 }
-DOC
+EOF
 }
 resource "aws_iam_role_policy" "ecs_events_run_task_with_any_role" {
   name = "ecs_events_run_task_with_any_role"
   role = aws_iam_role.ecs_events.id
 
-  policy = <<DOC
+  policy = <<EOF
 {
     "Version": "2012-10-17",
     "Statement": [
@@ -208,7 +208,7 @@ resource "aws_iam_role_policy" "ecs_events_run_task_with_any_role" {
         }
     ]
 }
-DOC
+EOF
 }
 
 resource "aws_cloudwatch_event_rule" "at_midnight" {
@@ -244,3 +244,71 @@ resource "aws_cloudwatch_event_target" "ecs_run_task" {
 }
 
 #--- Analytics
+
+# IAM
+resource "aws_iam_policy" "glue_policy" {
+  name        = "fs-glue-policy"
+  description = ""
+
+  policy = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "s3:GetObject",
+                "s3:PutObject"
+            ],
+            "Resource": [
+                "arn:aws:s3:::${aws_s3_bucket.posts_storage.id}/Twitter/*"
+            ]
+        }
+    ]
+}
+EOF
+}
+resource "aws_iam_role" "glue_role" {
+  name_prefix = "fs-producer-glue-role"
+  description = "Allows FS Glue to call AWS services on your behalf."
+
+  assume_role_policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "glue.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+}
+resource "aws_iam_role_policy_attachment" "glue_role_main_attach" {
+  role       = aws_iam_role.glue_role.name
+  policy_arn = aws_iam_policy.glue_policy.arn
+}
+resource "aws_iam_role_policy_attachment" "glue_role_service_attach" {
+  role       = aws_iam_role.glue_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole"
+}
+
+# Glue
+resource "aws_glue_catalog_database" "main" {
+  name = "fanstatsai"
+}
+resource "aws_glue_crawler" "twitter" {
+  database_name = aws_glue_catalog_database.main.name
+  name          = "FanStats-Twitter"
+  role          = aws_iam_role.glue_role.arn
+
+  schedule = "cron(30 5 ? * * *)"
+
+  s3_target {
+    path = "s3://${aws_s3_bucket.posts_storage.id}/Twitter/"
+  }
+}
